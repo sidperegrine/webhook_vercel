@@ -13,18 +13,41 @@ app.use(bodyParser.urlencoded({ extended: true }));
 // MongoDB Connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/webhook_db';
 
-// MongoDB connection options for better reliability on Vercel
+// MongoDB connection options optimized for Vercel serverless
 const mongoOptions = {
-  serverSelectionTimeoutMS: 5000,
+  serverSelectionTimeoutMS: 10000,
   socketTimeoutMS: 45000,
+  maxPoolSize: 10,
+  minPoolSize: 1,
 };
 
-mongoose.connect(MONGODB_URI, mongoOptions)
-  .then(() => console.log('✅ Connected to MongoDB'))
-  .catch(err => {
-    console.error('❌ MongoDB connection error:', err);
-    console.error('Connection string (masked):', MONGODB_URI.replace(/\/\/.*@/, '//*****@'));
-  });
+// Connection promise to reuse across serverless function calls
+let mongoConnection = null;
+
+async function connectToMongoDB() {
+  if (mongoConnection && mongoose.connection.readyState === 1) {
+    return mongoConnection;
+  }
+
+  if (!mongoConnection) {
+    mongoConnection = mongoose.connect(MONGODB_URI, mongoOptions)
+      .then(() => {
+        console.log('✅ Connected to MongoDB');
+        return mongoose.connection;
+      })
+      .catch(err => {
+        console.error('❌ MongoDB connection error:', err);
+        console.error('Connection string (masked):', MONGODB_URI.replace(/\/\/.*@/, '//*****@'));
+        mongoConnection = null;
+        throw err;
+      });
+  }
+
+  return mongoConnection;
+}
+
+// Initialize connection
+connectToMongoDB();
 
 // Initialize Firebase Admin SDK
 let firebaseInitialized = false;
@@ -101,6 +124,23 @@ const deviceTokenSchema = new mongoose.Schema({
 const Webhook = mongoose.model('Webhook', webhookSchema);
 const DeviceToken = mongoose.model('DeviceToken', deviceTokenSchema);
 
+// Middleware to ensure MongoDB connection
+async function ensureMongoConnection(req, res, next) {
+  try {
+    if (mongoose.connection.readyState !== 1) {
+      await connectToMongoDB();
+    }
+    next();
+  } catch (error) {
+    console.error('Failed to connect to MongoDB:', error);
+    res.status(503).json({
+      success: false,
+      message: 'Database connection unavailable',
+      error: error.message
+    });
+  }
+}
+
 // Function to send push notification
 async function sendPushNotification(payload, webhookId) {
   if (!firebaseInitialized) {
@@ -168,7 +208,7 @@ async function sendPushNotification(payload, webhookId) {
 }
 
 // Webhook endpoint - POST
-app.post('/webhook', async (req, res) => {
+app.post('/webhook', ensureMongoConnection, async (req, res) => {
   try {
     const webhookData = new Webhook({
       payload: req.body,
@@ -219,7 +259,7 @@ app.post('/webhook', async (req, res) => {
 });
 
 // Webhook endpoint - GET (for testing)
-app.get('/webhook', async (req, res) => {
+app.get('/webhook', ensureMongoConnection, async (req, res) => {
   try {
     const webhookData = new Webhook({
       payload: req.query,
@@ -263,7 +303,7 @@ app.get('/webhook', async (req, res) => {
 });
 
 // Register device token for push notifications
-app.post('/register-device', async (req, res) => {
+app.post('/register-device', ensureMongoConnection, async (req, res) => {
   try {
     const { token, deviceInfo, userId } = req.body;
 
@@ -305,7 +345,7 @@ app.post('/register-device', async (req, res) => {
 });
 
 // Unregister device token
-app.post('/unregister-device', async (req, res) => {
+app.post('/unregister-device', ensureMongoConnection, async (req, res) => {
   try {
     const { token } = req.body;
 
@@ -336,7 +376,7 @@ app.post('/unregister-device', async (req, res) => {
 });
 
 // Get all registered devices
-app.get('/devices', async (req, res) => {
+app.get('/devices', ensureMongoConnection, async (req, res) => {
   try {
     const devices = await DeviceToken.find({ active: true })
       .select('-token') // Don't expose tokens
@@ -358,7 +398,7 @@ app.get('/devices', async (req, res) => {
 });
 
 // Test notification endpoint
-app.post('/test-notification', async (req, res) => {
+app.post('/test-notification', ensureMongoConnection, async (req, res) => {
   try {
     const { title, message } = req.body;
 
@@ -383,7 +423,7 @@ app.post('/test-notification', async (req, res) => {
 });
 
 // Get all webhooks
-app.get('/webhooks', async (req, res) => {
+app.get('/webhooks', ensureMongoConnection, async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 10;
     const webhooks = await Webhook.find()
@@ -406,7 +446,7 @@ app.get('/webhooks', async (req, res) => {
 });
 
 // Get webhook by ID
-app.get('/webhooks/:id', async (req, res) => {
+app.get('/webhooks/:id', ensureMongoConnection, async (req, res) => {
   try {
     const webhook = await Webhook.findById(req.params.id);
     
@@ -432,7 +472,7 @@ app.get('/webhooks/:id', async (req, res) => {
 });
 
 // Delete all webhooks (for testing)
-app.delete('/webhooks', async (req, res) => {
+app.delete('/webhooks', ensureMongoConnection, async (req, res) => {
   try {
     const result = await Webhook.deleteMany({});
     
