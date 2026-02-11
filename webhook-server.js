@@ -1,6 +1,7 @@
 const express = require('express');
 const mongoose = require('mongoose');
 const bodyParser = require('body-parser');
+const admin = require('firebase-admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -10,11 +11,37 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // MongoDB Connection
-const MONGODB_URI = "mongodb+srv://sudhanshu_db_user:57noVDSClsUcZcnW@creataramongodb.g8c8bd1.mongodb.net/";
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/webhook_db';
 
-mongoose.connect(MONGODB_URI)
+// MongoDB connection options for better reliability on Vercel
+const mongoOptions = {
+  serverSelectionTimeoutMS: 5000,
+  socketTimeoutMS: 45000,
+};
+
+mongoose.connect(MONGODB_URI, mongoOptions)
   .then(() => console.log('✅ Connected to MongoDB'))
-  .catch(err => console.error('❌ MongoDB connection error:', err));
+  .catch(err => {
+    console.error('❌ MongoDB connection error:', err);
+    console.error('Connection string (masked):', MONGODB_URI.replace(/\/\/.*@/, '//*****@'));
+  });
+
+// Initialize Firebase Admin SDK
+let firebaseInitialized = false;
+try {
+  if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    firebaseInitialized = true;
+    console.log('✅ Firebase Admin initialized');
+  } else {
+    console.log('⚠️ Firebase not configured - push notifications disabled');
+  }
+} catch (error) {
+  console.error('❌ Firebase initialization error:', error.message);
+}
 
 // Define Webhook Schema
 const webhookSchema = new mongoose.Schema({
@@ -35,11 +62,110 @@ const webhookSchema = new mongoose.Schema({
     default: Date.now
   },
   sourceIp: String,
-  url: String
+  url: String,
+  notificationSent: {
+    type: Boolean,
+    default: false
+  },
+  notificationError: String
 });
 
-// Create Webhook Model
+// Device Token Schema - stores FCM tokens from mobile devices
+const deviceTokenSchema = new mongoose.Schema({
+  token: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  deviceInfo: {
+    platform: String,
+    deviceId: String,
+    appVersion: String
+  },
+  userId: String,
+  active: {
+    type: Boolean,
+    default: true
+  },
+  lastUsed: {
+    type: Date,
+    default: Date.now
+  },
+  createdAt: {
+    type: Date,
+    default: Date.now
+  }
+});
+
+// Create Models
 const Webhook = mongoose.model('Webhook', webhookSchema);
+const DeviceToken = mongoose.model('DeviceToken', deviceTokenSchema);
+
+// Function to send push notification
+async function sendPushNotification(payload, webhookId) {
+  if (!firebaseInitialized) {
+    console.log('⚠️ Firebase not initialized, skipping notification');
+    return { success: false, reason: 'Firebase not configured' };
+  }
+
+  try {
+    // Get all active device tokens
+    const devices = await DeviceToken.find({ active: true });
+    
+    if (devices.length === 0) {
+      console.log('⚠️ No devices registered for push notifications');
+      return { success: false, reason: 'No devices registered' };
+    }
+
+    const tokens = devices.map(d => d.token);
+
+    // Create notification message
+    const message = {
+      notification: {
+        title: payload.title || 'New Webhook Received',
+        body: payload.message || JSON.stringify(payload).substring(0, 100),
+      },
+      data: {
+        webhookId: webhookId.toString(),
+        payload: JSON.stringify(payload),
+        timestamp: new Date().toISOString()
+      },
+      tokens: tokens
+    };
+
+    // Send to multiple devices
+    const response = await admin.messaging().sendEachForMulticast(message);
+    
+    console.log(`✅ Push notifications sent: ${response.successCount}/${tokens.length}`);
+    
+    // Handle failed tokens
+    if (response.failureCount > 0) {
+      const failedTokens = [];
+      response.responses.forEach((resp, idx) => {
+        if (!resp.success) {
+          failedTokens.push(tokens[idx]);
+          console.error(`Failed to send to token ${idx}:`, resp.error);
+        }
+      });
+      
+      // Deactivate invalid tokens
+      await DeviceToken.updateMany(
+        { token: { $in: failedTokens } },
+        { active: false }
+      );
+    }
+
+    return {
+      success: true,
+      successCount: response.successCount,
+      failureCount: response.failureCount,
+      totalDevices: tokens.length
+    };
+  } catch (error) {
+    console.error('❌ Push notification error:', error);
+    return { success: false, error: error.message };
+  }
+}
 
 // Webhook endpoint - POST
 app.post('/webhook', async (req, res) => {
@@ -60,13 +186,27 @@ app.post('/webhook', async (req, res) => {
       payload: webhookData.payload
     });
 
+    // Send push notification
+    const notificationResult = await sendPushNotification(
+      req.body,
+      webhookData._id
+    );
+
+    // Update webhook with notification status
+    webhookData.notificationSent = notificationResult.success;
+    if (!notificationResult.success) {
+      webhookData.notificationError = notificationResult.reason || notificationResult.error;
+    }
+    await webhookData.save();
+
     res.status(200).json({
       success: true,
       message: 'Webhook received successfully',
       id: webhookData._id,
       timestamp: webhookData.timestamp,
       receivedData: webhookData.payload,
-      savedTo: 'MongoDB'
+      savedTo: 'MongoDB',
+      notification: notificationResult
     });
   } catch (error) {
     console.error('❌ Error saving webhook:', error);
@@ -91,19 +231,152 @@ app.get('/webhook', async (req, res) => {
 
     await webhookData.save();
     
+    // Send push notification
+    const notificationResult = await sendPushNotification(
+      req.query,
+      webhookData._id
+    );
+
+    webhookData.notificationSent = notificationResult.success;
+    if (!notificationResult.success) {
+      webhookData.notificationError = notificationResult.reason || notificationResult.error;
+    }
+    await webhookData.save();
+    
     res.status(200).json({
       success: true,
       message: 'Webhook GET request received',
       id: webhookData._id,
       timestamp: webhookData.timestamp,
       receivedData: webhookData.payload,
-      savedTo: 'MongoDB'
+      savedTo: 'MongoDB',
+      notification: notificationResult
     });
   } catch (error) {
     console.error('❌ Error saving webhook:', error);
     res.status(500).json({
       success: false,
       message: 'Error processing webhook',
+      error: error.message
+    });
+  }
+});
+
+// Register device token for push notifications
+app.post('/register-device', async (req, res) => {
+  try {
+    const { token, deviceInfo, userId } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Device token is required'
+      });
+    }
+
+    // Upsert device token
+    const device = await DeviceToken.findOneAndUpdate(
+      { token },
+      {
+        token,
+        deviceInfo,
+        userId,
+        active: true,
+        lastUsed: new Date()
+      },
+      { upsert: true, new: true }
+    );
+
+    console.log('📱 Device registered:', device._id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Device registered successfully',
+      deviceId: device._id
+    });
+  } catch (error) {
+    console.error('❌ Error registering device:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error registering device',
+      error: error.message
+    });
+  }
+});
+
+// Unregister device token
+app.post('/unregister-device', async (req, res) => {
+  try {
+    const { token } = req.body;
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Device token is required'
+      });
+    }
+
+    await DeviceToken.findOneAndUpdate(
+      { token },
+      { active: false }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Device unregistered successfully'
+    });
+  } catch (error) {
+    console.error('❌ Error unregistering device:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error unregistering device',
+      error: error.message
+    });
+  }
+});
+
+// Get all registered devices
+app.get('/devices', async (req, res) => {
+  try {
+    const devices = await DeviceToken.find({ active: true })
+      .select('-token') // Don't expose tokens
+      .sort({ lastUsed: -1 });
+    
+    res.status(200).json({
+      success: true,
+      count: devices.length,
+      devices
+    });
+  } catch (error) {
+    console.error('❌ Error fetching devices:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error fetching devices',
+      error: error.message
+    });
+  }
+});
+
+// Test notification endpoint
+app.post('/test-notification', async (req, res) => {
+  try {
+    const { title, message } = req.body;
+
+    const result = await sendPushNotification({
+      title: title || 'Test Notification',
+      message: message || 'This is a test notification from your webhook server'
+    }, 'test');
+
+    res.status(200).json({
+      success: true,
+      message: 'Test notification sent',
+      result
+    });
+  } catch (error) {
+    console.error('❌ Error sending test notification:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error sending test notification',
       error: error.message
     });
   }
@@ -179,18 +452,38 @@ app.delete('/webhooks', async (req, res) => {
 
 // Health check endpoint
 app.get('/health', (req, res) => {
+  const mongoStatus = mongoose.connection.readyState;
+  const statusMap = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting'
+  };
+  
   res.status(200).json({
     success: true,
     message: 'Server is running',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    mongodb: {
+      status: statusMap[mongoStatus],
+      hasConnectionString: !!process.env.MONGODB_URI,
+      connectionStringPrefix: process.env.MONGODB_URI ? process.env.MONGODB_URI.substring(0, 14) : 'none'
+    },
+    firebase: {
+      initialized: firebaseInitialized,
+      configured: !!process.env.FIREBASE_SERVICE_ACCOUNT
+    }
   });
 });
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Webhook server running on port ${PORT}`);
-  console.log(`📍 Webhook URL: http://localhost:${PORT}/webhook`);
-  console.log(`📊 View all webhooks: http://localhost:${PORT}/webhooks`);
-});
+// Start server (only in local development)
+if (process.env.NODE_ENV !== 'production') {
+  app.listen(PORT, () => {
+    console.log(`🚀 Webhook server running on port ${PORT}`);
+    console.log(`📍 Webhook URL: http://localhost:${PORT}/webhook`);
+    console.log(`📊 View all webhooks: http://localhost:${PORT}/webhooks`);
+  });
+}
 
+// Export for Vercel serverless
 module.exports = app;
