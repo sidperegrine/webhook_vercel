@@ -161,17 +161,45 @@ async function sendPushNotification(payload, webhookId) {
 
     // Create notification message
     const message = {
-      notification: {
-        title: payload.title || 'New Webhook Received',
-        body: payload.message || JSON.stringify(payload).substring(0, 100),
-      },
-      data: {
-        webhookId: webhookId.toString(),
-        payload: JSON.stringify(payload),
-        timestamp: new Date().toISOString()
-      },
-      tokens: tokens
-    };
+  tokens: tokens,
+
+  notification: {
+    title: payload.title || 'New Webhook Received',
+    body: payload.message || JSON.stringify(payload).substring(0, 100),
+  },
+
+  data: {
+    webhookId: webhookId.toString(),
+    payload: JSON.stringify(payload),
+    timestamp: new Date().toISOString()
+  },
+
+  apns: {
+    payload: {
+      aps: {
+        sound: "default",
+        badge: 1,
+        contentAvailable: true
+      }
+    },
+    headers: {
+      "apns-priority": "10"
+    }
+  }
+};
+
+    // const message = {
+    //   notification: {
+    //     title: payload.title || 'New Webhook Received',
+    //     body: payload.message || JSON.stringify(payload).substring(0, 100),
+    //   },
+    //   data: {
+    //     webhookId: webhookId.toString(),
+    //     payload: JSON.stringify(payload),
+    //     timestamp: new Date().toISOString()
+    //   },
+    //   tokens: tokens
+    // };
 
     // Send to multiple devices
     const response = await admin.messaging().sendEachForMulticast(message);
