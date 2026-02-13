@@ -52,7 +52,7 @@ async function connectToMongoDB() {
 connectToMongoDB();
 
 // External API Configuration
-const MASTER_DATA_API = process.env.MASTER_DATA_API || 'https://7sq2mm2c13.execute-api.ap-south-1.amazonaws.com/prod/masterdata';
+const MASTER_DATA_API =  'https://7sq2mm2c13.execute-api.ap-south-1.amazonaws.com/prod/masterdata';
 
 // Function to check if user exists in Master Data API
 async function checkUserExistsInAPI(phoneNumber) {
