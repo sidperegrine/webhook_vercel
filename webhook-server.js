@@ -260,7 +260,7 @@ function generateOTP(length = 6) {
 // Function to normalize phone number with +91 prefix
 function normalizePhoneNumber(phoneNumber) {
   // Remove all non-digit characters except +
-  let cleaned = normalizePhoneNumber(phoneNumber);
+  let cleaned = phoneNumber.replace(/[^\d+]/g, '');
   
   // If it starts with +91, return as is
   if (cleaned.startsWith('+91')) {
