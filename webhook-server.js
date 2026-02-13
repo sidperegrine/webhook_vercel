@@ -248,7 +248,7 @@ async function ensureMongoConnection(req, res, next) {
 }
 
 // Function to generate OTP
-function generateOTP(length = 6) {
+function generateOTP(length = 4) {
   const digits = '0123456789';
   let otp = '';
   for (let i = 0; i < length; i++) {
@@ -413,8 +413,8 @@ app.post('/send-otp', ensureMongoConnection, async (req, res) => {
       });
     }
 
-    // Generate OTP
-    const otp = generateOTP(6);
+    // Generate OTP (4 digits)
+    const otp = generateOTP(4);
 
     // Save OTP to MongoDB (expires in 10 minutes)
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
@@ -476,6 +476,15 @@ app.post('/verify-otp', ensureMongoConnection, async (req, res) => {
       });
     }
 
+    // Validate OTP is 4 digits
+    if (!/^\d{4}$/.test(otp)) {
+      return res.status(400).json({
+        success: false,
+        message: 'OTP must be 4 digits',
+        error: 'INVALID_OTP_FORMAT'
+      });
+    }
+
     const cleanPhone = normalizePhoneNumber(phoneNumber);
 
     // Find OTP in database
@@ -512,21 +521,48 @@ app.post('/verify-otp', ensureMongoConnection, async (req, res) => {
       });
     }
 
-    // Verify OTP
-    if (otpDoc.otp !== otp) {
+    // Verify OTP with MSG91
+    try {
+      const verifyUrl = `https://control.msg91.com/api/v5/otp/verify?otp=${otp}&mobile=${cleanPhone}`;
+      
+      const msg91Response = await axios.get(verifyUrl, {
+        headers: {
+          'authkey': MSG91_AUTH_KEY
+        }
+      });
+
+      console.log('✅ MSG91 verification response:', msg91Response.data);
+
+      // Check if MSG91 verification was successful
+      if (msg91Response.data.type !== 'success') {
+        // Increment attempts in our database
+        otpDoc.attempts += 1;
+        await otpDoc.save();
+
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid OTP',
+          error: 'INVALID_OTP',
+          attemptsRemaining: 5 - otpDoc.attempts
+        });
+      }
+
+    } catch (msg91Error) {
+      console.error('❌ MSG91 verification error:', msg91Error.response?.data || msg91Error.message);
+      
       // Increment attempts
       otpDoc.attempts += 1;
       await otpDoc.save();
 
       return res.status(400).json({
         success: false,
-        message: 'Invalid OTP',
+        message: 'Invalid OTP or verification failed',
         error: 'INVALID_OTP',
         attemptsRemaining: 5 - otpDoc.attempts
       });
     }
 
-    // OTP is correct
+    // OTP is correct - mark as verified
     otpDoc.verified = true;
     await otpDoc.save();
 
@@ -581,40 +617,50 @@ app.post('/resend-otp', ensureMongoConnection, async (req, res) => {
       });
     }
 
-    // Delete old OTPs
+    // Delete old OTPs from our database
     await OTP.deleteMany({ phoneNumber: cleanPhone });
 
-    // Generate new OTP
-    const otp = generateOTP(6);
-    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    // Use MSG91 retry API to resend OTP
+    try {
+      const retryUrl = `https://control.msg91.com/api/v5/otp/retry?mobile=${cleanPhone}&authkey=${MSG91_AUTH_KEY}&retrytype=text`;
+      
+      const msg91Response = await axios.get(retryUrl);
 
-    const otpDoc = new OTP({
-      phoneNumber: cleanPhone,
-      otp: otp,
-      purpose: 'login',
-      expiresAt: expiresAt
-    });
+      console.log('✅ MSG91 retry response:', msg91Response.data);
 
-    await otpDoc.save();
+      if (msg91Response.data.type !== 'success') {
+        return res.status(500).json({
+          success: false,
+          message: 'Failed to resend OTP',
+          error: msg91Response.data.message || 'MSG91 retry failed'
+        });
+      }
 
-    // Send OTP via MSG91
-    const smsResult = await sendOTPViaMSG91(cleanPhone, otp);
+      // Save new OTP record in our database for tracking
+      const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+      const otpDoc = new OTP({
+        phoneNumber: cleanPhone,
+        otp: 'resent', // MSG91 handles the actual OTP
+        purpose: 'login',
+        expiresAt: expiresAt
+      });
+      await otpDoc.save();
 
-    if (!smsResult.success) {
+      res.status(200).json({
+        success: true,
+        message: 'OTP resent successfully',
+        phoneNumber: cleanPhone,
+        expiresIn: 600
+      });
+
+    } catch (msg91Error) {
+      console.error('❌ MSG91 retry error:', msg91Error.response?.data || msg91Error.message);
       return res.status(500).json({
         success: false,
-        message: 'Failed to send OTP',
-        error: smsResult.error
+        message: 'Failed to resend OTP',
+        error: msg91Error.response?.data?.message || msg91Error.message
       });
     }
-
-    res.status(200).json({
-      success: true,
-      message: 'OTP resent successfully',
-      phoneNumber: cleanPhone,
-      expiresIn: 600,
-      ...(process.env.NODE_ENV === 'development' && { otp: otp })
-    });
 
   } catch (error) {
     console.error('❌ Error resending OTP:', error);
