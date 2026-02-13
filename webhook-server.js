@@ -13,7 +13,7 @@ app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 // MongoDB Connection
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/webhook_db';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://sudhanshu_db_user:57noVDSClsUcZcnW@creataramongodb.g8c8bd1.mongodb.net/';
 
 // MongoDB connection options optimized for Vercel serverless
 const mongoOptions = {
