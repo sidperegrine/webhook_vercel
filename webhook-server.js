@@ -364,37 +364,37 @@ function normalizePhoneNumber(phoneNumber) {
 const eventTemplates = {
   // Battery Events
   "BATTERY_HIGH_TEMPERATURE": {
-    title: "⚠️ Battery Warning",
+    title: " Battery Warning",
     body: "Your vehicle battery temperature is high. Please stop and let it cool down.",
     priority: "high",
     sound: "alert"
   },
   "BATTERY_LOW_VOLTAGE": {
-    title: "🔋 Low Battery",
+    title: "Low Battery",
     body: "Your vehicle battery voltage is low. Please charge soon.",
     priority: "high",
     sound: "default"
   },
   "BATTERY_CRITICAL_LOW": {
-    title: "🚨 Critical Battery",
+    title: "Critical Battery",
     body: "Battery critically low! Find a charging station immediately.",
     priority: "critical",
     sound: "alert"
   },
   "CHARGE_OVER_TEMPERATURE": {
-    title: "⚠️ Charging Alert",
+    title: "Charging Alert",
     body: "Charging temperature too high. Charging stopped for safety.",
     priority: "high",
     sound: "alert"
   },
   "CHARGING_COMPLETE": {
-    title: "✅ Charging Complete",
+    title: "Charging Complete",
     body: "Your vehicle is fully charged and ready to go!",
     priority: "normal",
     sound: "default"
   },
   "CHARGING_STARTED": {
-    title: "🔌 Charging Started",
+    title: "Charging Started",
     body: "Your vehicle is now charging.",
     priority: "normal",
     sound: "default"
@@ -402,25 +402,25 @@ const eventTemplates = {
   
   // Motor/MCU Events
   "MCU_DCBUS_OVERCURRENT": {
-    title: "🚨 Motor Fault Alert",
+    title: "Motor Fault Alert",
     body: "Critical motor fault detected. Please stop immediately and contact service.",
     priority: "critical",
     sound: "alert"
   },
   "MOTOR_OVERHEAT": {
-    title: "⚠️ Motor Overheating",
+    title: "Motor Overheating",
     body: "Motor temperature is too high. Please stop and let it cool.",
     priority: "high",
     sound: "alert"
   },
   "MOTOR_FAULT": {
-    title: "⚠️ Motor Issue",
+    title: "Motor Issue",
     body: "Motor fault detected. Please have your vehicle serviced.",
     priority: "high",
     sound: "alert"
   },
   "CONTROLLER_FAULT": {
-    title: "⚠️ Controller Error",
+    title: "Controller Error",
     body: "Controller fault detected. Service required.",
     priority: "high",
     sound: "alert"
@@ -428,19 +428,19 @@ const eventTemplates = {
   
   // System Events
   "SOFTWARE_UPDATE_AVAILABLE": {
-    title: "📲 Update Available",
+    title: "Update Available",
     body: "New software update is available for your vehicle.",
     priority: "normal",
     sound: "default"
   },
   "SERVICE_DUE": {
-    title: "🔧 Service Reminder",
+    title: "Service Reminder",
     body: "Your vehicle is due for service. Please schedule an appointment.",
     priority: "normal",
     sound: "default"
   },
   "MAINTENANCE_REQUIRED": {
-    title: "🔧 Maintenance Required",
+    title: "Maintenance Required",
     body: "Your vehicle requires maintenance. Please check your app for details.",
     priority: "normal",
     sound: "default"
@@ -448,19 +448,19 @@ const eventTemplates = {
   
   // Security Events
   "THEFT_ALERT": {
-    title: "🚨 Security Alert",
+    title: "Security Alert",
     body: "Unauthorized access detected! Check your vehicle immediately.",
     priority: "critical",
     sound: "alert"
   },
   "GEOFENCE_EXIT": {
-    title: "📍 Geofence Alert",
+    title: "Geofence Alert",
     body: "Your vehicle has exited the designated area.",
     priority: "high",
     sound: "alert"
   },
   "UNAUTHORIZED_ACCESS": {
-    title: "🔒 Security Alert",
+    title: "Security Alert",
     body: "Unauthorized access attempt detected.",
     priority: "critical",
     sound: "alert"
@@ -468,19 +468,19 @@ const eventTemplates = {
   
   // Operational
   "LOW_BATTERY_WARNING": {
-    title: "🔋 Low Battery",
+    title: "Low Battery",
     body: "Battery running low. Please charge soon.",
     priority: "high",
     sound: "default"
   },
   "RANGE_LOW": {
-    title: "📉 Low Range",
+    title: "Low Range",
     body: "Vehicle range is low. Plan to charge soon.",
     priority: "high",
     sound: "default"
   },
   "SPEED_LIMIT_EXCEEDED": {
-    title: "⚠️ Speed Alert",
+    title: "Speed Alert",
     body: "Speed limit exceeded. Please drive safely.",
     priority: "normal",
     sound: "default"
@@ -488,7 +488,7 @@ const eventTemplates = {
   
   // Default template for unknown events
   "DEFAULT": {
-    title: "🔔 Vehicle Alert",
+    title: "Vehicle Alert",
     body: "Your vehicle requires attention. Check your app for details.",
     priority: "normal",
     sound: "default"
